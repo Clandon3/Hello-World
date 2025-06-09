@@ -37,13 +37,14 @@ player_games_df <- as.data.frame(player_games)
 # Step 3: Summarize 3PT shooting stats per player
 player_3pt_summary <- player_games %>%
   select(PLAYER_NAME, PLAYER_ID, TEAM_ABBREVIATION, GAME_DATE,
-         FG3M, FG3A, FG3_PCT, BLK, STL) %>%
+         FG3M, FG3A, FG3_PCT, BLK, STL, PLUS_MINUS) %>%
   mutate(
     FG3M = as.numeric(FG3M),
     FG3A = as.numeric(FG3A),
     FG3_PCT = as.numeric(FG3_PCT),
     BLK = as.numeric(BLK),
-    STL = as.numeric(STL)
+    STL = as.numeric(STL),
+    PLUS_MINUS = as.numeric(PLUS_MINUS)
   ) %>%
   group_by(PLAYER_NAME, PLAYER_ID) %>%
   summarise(
@@ -53,6 +54,7 @@ player_3pt_summary <- player_games %>%
     BPG = mean(BLK),
     SPG = mean(STL),
     STOCKS = sum(BPG, SPG, na.rm = TRUE),
+    TOTAL_PLUS_MINUS = sum(PLUS_MINUS, na.rm = TRUE),
     GP = n(),
     .groups = "drop"
   ) %>%
@@ -111,5 +113,4 @@ Threept_vs_stocks_plot
 ggsave("Threept_vs_stocks_plot.png", width = 10, height = 8, dpi = 300)
 
 ```
-
 
