@@ -113,4 +113,29 @@ Threept_vs_stocks_plot
 ggsave("Threept_vs_stocks_plot.png", width = 10, height = 8, dpi = 300)
 
 ```
+```{r}
+#create new plot for plus minus and 3pt%
+
+Threept_vs_plus_minus_plot <- ggplot(player_3pt_summary, aes(x = TOTAL_PLUS_MINUS, y = SHOT_QUALITY)) +
+  #geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_hline(yintercept = mean(player_3pt_summary$SHOT_QUALITY), linetype = "dashed", color = "red2") +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.15, height = 0.5)) +
+  labs(
+    title = "2025 NBA Playoffs: 3PT% vs Plus Minus",
+    subtitle = "Min. 20 3PA | Source: nba.com via hoopR",
+    x = "Total Individual Plus Minus", 
+    y = "Shot Quality (3P%)"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+Threept_vs_plus_minus_plot
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/Threept_vs_plus_minus_plot.png", width = 10, height = 8, dpi = 300)
+```
 
