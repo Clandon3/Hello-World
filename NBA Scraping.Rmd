@@ -9,14 +9,15 @@ date: "2025-06-04"
 rm(list=ls(all=T)) #removing objects (how to clear environment)
 knitr::opts_chunk$set(echo = TRUE)
 
-#install.packages(c("hoopR", "ggimage", "httr", "jsonlite", "stringr"))
+library(hoopR)
+library(dplyr)
+library(ggplot2)
+library(ggimage)
 ```
 
 # Step 1: Scrape 3PT Shooting Stats from NBA API
+## Data Cleaning for regular Season
 ```{r}
-library(hoopR)
-library(dplyr)
-
 # Get full 2025 Playoff logs for ALL players
 logs <- nba_playergamelogs(
   season = "2024-25",
@@ -27,72 +28,81 @@ logs <- nba_playergamelogs(
 
 # Extract actual log data
 player_games <- logs$PlayerGameLogs
-
 # Check number of rows (should be 100s)
 nrow(player_games)
-
 player_games_df <- as.data.frame(player_games)
 
+library(ggplot2)
+library(ggimage)
 
-# Step 3: Summarize 3PT shooting stats per player
-player_3pt_summary <- player_games %>%
+
+player_3pt_summary_playoffs <- player_games %>%
   select(PLAYER_NAME, PLAYER_ID, TEAM_ABBREVIATION, GAME_DATE,
-         FG3M, FG3A, FG3_PCT, BLK, STL, PLUS_MINUS) %>%
+         FG3M, FG3A, FG3_PCT, BLK, STL, PLUS_MINUS, REB, TOV, AST) %>%
   mutate(
     FG3M = as.numeric(FG3M),
     FG3A = as.numeric(FG3A),
     FG3_PCT = as.numeric(FG3_PCT),
     BLK = as.numeric(BLK),
     STL = as.numeric(STL),
+    REB = as.numeric(REB),
+    TOV = as.numeric(TOV),
+    AST = as.numeric(AST),
     PLUS_MINUS = as.numeric(PLUS_MINUS)
   ) %>%
   group_by(PLAYER_NAME, PLAYER_ID) %>%
   summarise(
     TOTAL_FG3M = sum(FG3M, na.rm = TRUE),
+    TOTAL_STLS = sum(STL, na.rm = TRUE),
     TOTAL_FG3A = sum(FG3A, na.rm = TRUE),
     AVG_FG3_PCT = mean(FG3_PCT, na.rm = TRUE),
-    BPG = mean(BLK),
-    SPG = mean(STL),
+    AVG_FG3_PCT2 = ifelse(TOTAL_FG3A == 0, 0, TOTAL_FG3M / TOTAL_FG3A),
+    BPG = mean(BLK, na.rm = TRUE),
+    SPG = mean(STL, na.rm = TRUE),
+    RPG = mean(REB, na.rm = TRUE),
+    TPG = mean(TOV, na.rm = TRUE),
+    APG = mean(AST, na.rm = TRUE),
     STOCKS = sum(BPG, SPG, na.rm = TRUE),
     TOTAL_PLUS_MINUS = sum(PLUS_MINUS, na.rm = TRUE),
     GP = n(),
     .groups = "drop"
-  ) %>%
-  filter(TOTAL_FG3A >= 20)  # Minimum attempts threshold
+  ) %>% 
+ filter(TOTAL_FG3A >= 1)
 
 # Step 4: View result
-head(player_3pt_summary)
+#head(player_3pt_summary_playoffs)
 
-# this is test edit
-
-```
-
-```{r}
-library(ggplot2)
-library(ggimage)
-
-#check number of games is correct
-AntStats <- player_games %>% 
-  filter(PLAYER_NAME =="Anthony Edwards")
-
-
-# Add image URL to each player row
-player_3pt_summary <- player_3pt_summary %>%
+player_3pt_summary_playoffs <- player_3pt_summary_playoffs %>%
   mutate(IMG_URL = paste0("https://cdn.nba.com/headshots/nba/latest/1040x760/", PLAYER_ID, ".png"))
 
 #player_3pt_summary$IMG_URL <- paste0("https://cdn.nba.com/headshots/nba/latest/1040x760/", player_3pt_summary$PLAYER_ID, ".png")
 
-league_avg_3p <- mean(player_3pt_summary$AVG_FG3_PCT, na.rm = TRUE)
+league_avg_3p <- mean(player_3pt_summary_playoffs$AVG_FG3_PCT2, na.rm = TRUE) 
 
-player_3pt_summary <- player_3pt_summary %>%
+player_3pt_summary_playoffs <- player_3pt_summary_playoffs %>%
   mutate(
     SHOT_QUALITY = AVG_FG3_PCT*100,
-    SHOT_MAKING = AVG_FG3_PCT*100 - league_avg_3p*100
+    SHOT_QUALITY_2 = AVG_FG3_PCT2*100,
+    SHOT_MAKING = AVG_FG3_PCT2*100 - league_avg_3p*100
   )
 
-Threept_vs_stocks_plot <- ggplot(player_3pt_summary, aes(x = STOCKS, y = SHOT_QUALITY)) +
+league_avg_3p_PO <- player_3pt_summary_playoffs %>%
+  filter(TOTAL_FG3A >= 1) %>%
+  summarise(
+    league_avg = sum(TOTAL_FG3M, na.rm = TRUE) / sum(TOTAL_FG3A, na.rm = TRUE)
+  ) 
+league_avg_3p_value <- pull(league_avg_3p_PO, league_avg)
+
+```
+
+# 2025 NBA Playoffs: 3PT% vs Stocks
+```{r}
+Threept_vs_stocks <- player_3pt_summary_playoffs %>% 
+ filter(TOTAL_FG3A >= 20)
+
+Threept_vs_stocks_plot <- ggplot(Threept_vs_stocks, aes(x = STOCKS, y = SHOT_QUALITY_2)) +
   #geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
-  geom_hline(yintercept = mean(player_3pt_summary$SHOT_QUALITY), linetype = "dashed", color = "red2") +
+  geom_hline(yintercept = league_avg_3p_value * 100, linetype = "dashed", color = "red2") +
   geom_image(aes(image = IMG_URL), 
              size = 0.15, 
              asp = 1.0,
@@ -111,14 +121,19 @@ Threept_vs_stocks_plot <- ggplot(player_3pt_summary, aes(x = STOCKS, y = SHOT_QU
 Threept_vs_stocks_plot
 
 ggsave("Threept_vs_stocks_plot.png", width = 10, height = 8, dpi = 300)
-
 ```
+
+
+#2025 NBA Playoffs: 3PT% vs Plus Minus
 ```{r}
 #create new plot for plus minus and 3pt%
 
-Threept_vs_plus_minus_plot <- ggplot(player_3pt_summary, aes(x = TOTAL_PLUS_MINUS, y = SHOT_QUALITY)) +
+Threept_vs_plus_minus_plot <- player_3pt_summary_playoffs %>% 
+ filter(TOTAL_FG3A >= 20)
+
+Threept_vs_plus_minus_plot <- ggplot(Threept_vs_plus_minus_plot, aes(x = TOTAL_PLUS_MINUS, y = SHOT_QUALITY_2)) +
   #geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
-  geom_hline(yintercept = mean(player_3pt_summary$SHOT_QUALITY), linetype = "dashed", color = "red2") +
+  geom_hline(yintercept = league_avg_3p_value * 100, linetype = "dashed", color = "red2") +
   geom_image(aes(image = IMG_URL), 
              size = 0.15, 
              asp = 1.0,
@@ -137,5 +152,479 @@ Threept_vs_plus_minus_plot <- ggplot(player_3pt_summary, aes(x = TOTAL_PLUS_MINU
 Threept_vs_plus_minus_plot
 
 ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/Threept_vs_plus_minus_plot.png", width = 10, height = 8, dpi = 300)
+```
+
+## Data Cleaning for regular Season
+```{r}
+logs_rs <- nba_playergamelogs(
+  season = "2024-25",
+  season_type = "Regular Season",
+  league_id = "00",  # NBA (not G-League etc.)
+  player_id = NULL   # <- THIS is what ensures it's not limited to just LeBron
+)
+
+# Extract actual log data
+player_games_rs <- logs_rs$PlayerGameLogs
+
+# Check number of rows (should be 100s)
+nrow(player_games_rs)
+
+
+player_3pt_summary_Regular <- player_games_rs %>%
+  select(PLAYER_NAME, PLAYER_ID, TEAM_ABBREVIATION, GAME_DATE,
+         FG3M, FG3A, FG3_PCT, BLK, STL, PLUS_MINUS, REB, TOV, AST) %>%
+  mutate(
+    FG3M = as.numeric(FG3M),
+    FG3A = as.numeric(FG3A),
+    FG3_PCT = as.numeric(FG3_PCT),
+    BLK = as.numeric(BLK),
+    STL = as.numeric(STL),
+    REB = as.numeric(REB),
+    TOV = as.numeric(TOV),
+    AST = as.numeric(AST),
+    PLUS_MINUS = as.numeric(PLUS_MINUS)
+  ) %>%
+  group_by(PLAYER_NAME, PLAYER_ID) %>%
+  summarise(
+    TOTAL_FG3M = sum(FG3M, na.rm = TRUE),
+    TOTAL_STLS = sum(STL, na.rm = TRUE),
+    TOTAL_FG3A = sum(FG3A, na.rm = TRUE),
+    AVG_FG3_PCT = mean(FG3_PCT, na.rm = TRUE),
+    AVG_FG3_PCT2 = ifelse(TOTAL_FG3A == 0, 0, TOTAL_FG3M / TOTAL_FG3A),
+    BPG = mean(BLK, na.rm = TRUE),
+    SPG = mean(STL, na.rm = TRUE),
+    RPG = mean(REB, na.rm = TRUE),
+    TPG = mean(TOV, na.rm = TRUE),
+    APG = mean(AST, na.rm = TRUE),
+    STOCKS = sum(BPG, SPG, na.rm = TRUE),
+    TOTAL_PLUS_MINUS = sum(PLUS_MINUS, na.rm = TRUE),
+    GP = n(),
+    .groups = "drop"
+  ) 
+
+##### left off here, need to fix 3pt average
+
+
+player_3pt_summary_Regular <- player_3pt_summary_Regular %>%
+  mutate(IMG_URL = paste0("https://cdn.nba.com/headshots/nba/latest/1040x760/", PLAYER_ID, ".png"))
+
+player_3pt_summary_Regular_avg <- player_3pt_summary_Regular %>%  
+   filter(TOTAL_FG3A >= 1)
+
+league_avg_3p_rs <- mean(player_3pt_summary_Regular_avg$AVG_FG3_PCT2, na.rm = TRUE)
+
+player_3pt_summary_Regular <- player_3pt_summary_Regular %>%
+  mutate(
+    SHOT_QUALITY = AVG_FG3_PCT*100,
+    SHOT_QUALITY_2 = AVG_FG3_PCT2*100,
+    SHOT_MAKING = AVG_FG3_PCT2*100 - league_avg_3p_rs*100
+  )
+
+league_avg_3p_rs <- player_3pt_summary_Regular %>%
+  filter(TOTAL_FG3A >= 1) %>%
+  summarise(
+    league_avg = sum(TOTAL_FG3M, na.rm = TRUE) / sum(TOTAL_FG3A, na.rm = TRUE)
+  ) 
+
+league_avg_3p_value_rs <- pull(league_avg_3p_rs, league_avg)
+```
+
+
+# 2025 NBA Regular Season: 3PT% vs Stocks
+```{r}
+Threept_vs_stocks_plot <- player_3pt_summary_Regular %>% 
+ filter(TOTAL_FG3A >= 200)
+
+Threept_vs_stocks_plot <- ggplot(Threept_vs_stocks_plot, aes(x = STOCKS, y = SHOT_QUALITY_2)) +
+  #geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_hline(yintercept = league_avg_3p_value_rs * 100, linetype = "dashed", color = "red2") +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.15, height = 0.5)) +
+  labs(
+    title = "2025 NBA Regular Season: 3PT% vs Stocks",
+    subtitle = "Min. 200 3PA | Source: nba.com via hoopR",
+    x = "Steals + Blocks (Stocks)", 
+    y = "Shot Quality (3P%)"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+Threept_vs_stocks_plot
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/Threept_stocks_RS.png", width = 10, height = 8, dpi = 300)
+```
+
+
+# 2025 NBA Regualar Season: 3PT% vs Plus Minus
+```{r}
+Threept_vs_plus_minus_plot <- player_3pt_summary_Regular %>% 
+ filter(TOTAL_FG3A >= 200)
+
+Threept_vs_plus_minus_plot <- ggplot(Threept_vs_plus_minus_plot, aes(x = TOTAL_PLUS_MINUS, y = SHOT_QUALITY_2)) +
+  #geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_hline(yintercept = league_avg_3p_value_rs * 100, linetype = "dashed", color = "red2") +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.5, height = 0.75)) +
+  labs(
+    title = "2025 NBA Regualar Season: 3PT% vs Plus Minus",
+    subtitle = "Min. 200 3PA | Source: nba.com via hoopR",
+    x = "Total Individual Plus Minus", 
+    y = "Shot Quality (3P%)"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+Threept_vs_plus_minus_plot
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/Threept_vs_plus_minus_RS.png", width = 10, height = 8, dpi = 300)
+```
+
+
+# 2025 NBA Regualar Season: Rebounds vs Blocked Shots
+```{r}
+Rebounds_blocks <- player_3pt_summary_Regular %>% 
+  filter(RPG >= 6.0)
+
+Rebounds_blocks <- ggplot(Rebounds_blocks, aes(x = RPG, y = BPG)) +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.5, height = 0.5)) +
+  labs(
+    title = "2025 NBA Regualar Season: Rebounds vs Blocked Shots",
+    subtitle = "Min. 6 RPG | Source: nba.com via hoopR",
+    x = "Rebounds Per Game", 
+    y = "Blocks Per Game"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+Rebounds_blocks
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/Rebounds_blocks_RS.jpg", width = 10, height = 8, dpi = 300)
+
+```
+
+
+# 2025 NBA Playoffs: Rebounds vs Blocked Shots
+```{r}
+Rebounds_blocks_po <- player_3pt_summary_playoffs %>% 
+  filter(RPG >= 5.0)
+
+Rebounds_blocks_po <- ggplot(Rebounds_blocks_po, aes(x = RPG, y = BPG)) +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.5, height = 0.5)) +
+  labs(
+    title = "2025 NBA Playoffs: Rebounds vs Blocked Shots",
+    subtitle = "Min. 5 RPG | Source: nba.com via hoopR",
+    x = "Rebounds Per Game", 
+    y = "Blocks Per Game"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+Rebounds_blocks_po
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/Rebounds_blocks_Playoffs.jpg", width = 10, height = 8, dpi = 300)
+
+```
+# NBA regular Season: Blocks vs Rebounds among 3pt shooters
+```{r}
+
+Rebounds_blocks_stretch <- player_3pt_summary_Regular %>% 
+filter(TOTAL_FG3M >= 50 & RPG >= 5.0) 
+
+Rebounds_blocks_stretch <- ggplot(Rebounds_blocks_stretch, aes(x = RPG, y = BPG)) +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.5, height = 0.5)) +
+  labs(
+    title = "2025 NBA Regualar Season: Rebounds vs Blocked Shots",
+    subtitle = "Min. 50 3pt FG Made and 5 RPG  | Source: nba.com via hoopR",
+    x = "Rebounds Per Game", 
+    y = "Blocks Per Game"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+Rebounds_blocks_stretch
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/Rebounds_blocks_stretch_RS.jpg", width = 10, height = 8, dpi = 300)
+
+```
+
+#Per 36
+```{r}
+Per36  <- player_games_rs %>%
+  select(PLAYER_NAME, PLAYER_ID, TEAM_ABBREVIATION, GAME_DATE,
+         FG3M, FG3A, FG3_PCT, BLK, STL, PLUS_MINUS, REB, MIN) %>%
+  mutate(
+    FG3M = as.numeric(FG3M),
+    FG3A = as.numeric(FG3A),
+    FG3_PCT = as.numeric(FG3_PCT),
+    BLK = as.numeric(BLK),
+    STL = as.numeric(STL),
+    REB = as.numeric(REB),
+    MIN = as.numeric(MIN),
+    PLUS_MINUS = as.numeric(PLUS_MINUS)
+  ) %>%
+  group_by(PLAYER_NAME, PLAYER_ID) %>%
+  summarise(
+    TOTAL_FG3M = sum(FG3M, na.rm = TRUE),
+    TOTAL_FG3A = sum(FG3A, na.rm = TRUE),
+    AVG_FG3_PCT = mean(FG3_PCT, na.rm = TRUE),
+    BPG = sum(BLK, na.rm = TRUE),
+    SPG = sum(STL, na.rm = TRUE),
+    RPG = sum(REB, na.rm = TRUE),
+    TOTAL_PLUS_MINUS = sum(PLUS_MINUS, na.rm = TRUE),
+    TOTAL_MIN = sum(MIN, na.rm = TRUE),
+    GP = n(),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    STOCKS = BPG + SPG,
+    STOCKS_PER36 = (STOCKS / TOTAL_MIN) * 36,
+    FG3M_PER36 = (TOTAL_FG3M / TOTAL_MIN) * 36,
+    REB_PER36 = (RPG / TOTAL_MIN) * 36,
+    BLK_PER36 = (BPG / TOTAL_MIN) * 36,
+    PLUS_MINUS_PER36 = (TOTAL_PLUS_MINUS / TOTAL_MIN) * 36
+  ) 
+
+Per36 <- Per36 %>%
+  mutate(IMG_URL = paste0("https://cdn.nba.com/headshots/nba/latest/1040x760/", PLAYER_ID, ".png"))
+
+Rebounds_blocks_36 <- Per36 %>% 
+  filter(REB_PER36 >= 9.0 & GP >= 10)  # Threshold
+
+Rebounds_blocks_36 <- ggplot(Rebounds_blocks_36, aes(x = REB_PER36, y = BLK_PER36)) +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.5, height = 0.5)) +
+  labs(
+    title = "2025 NBA Regualar Season: Rebounds vs Blocks (Per 36 mins)",
+    subtitle = "Min. 9 RPG/36 and 10 GP | Source: nba.com via hoopR",
+    x = "Rebounds Per Game", 
+    y = "Blocks Per Game"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+Rebounds_blocks_36
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/Rebounds_blocks_RS_36.jpg", width = 10, height = 8, dpi = 300)
+
+
+#### For stretch Bigs
+
+Rebounds_blocks_36_stgretch <- Per36 %>% 
+  filter(REB_PER36 >= 9.0 & TOTAL_FG3A >= 50)  # Threshold
+
+Rebounds_blocks_36_stgretch <- ggplot(Rebounds_blocks_36_stgretch, aes(x = REB_PER36, y = BLK_PER36)) +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.5, height = 0.5)) +
+  labs(
+    title = "2025 NBA Regualar Season: Rebounds vs Blocks (Per 36 mins)",
+    subtitle = "Min. 9 RPG/36 and Min 50 3PTA | Source: nba.com via hoopR",
+    x = "Rebounds Per Game", 
+    y = "Blocks Per Game"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+Rebounds_blocks_36_stgretch
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/Rebounds_blocks_stretch_RS_36.jpg", width = 10, height = 8, dpi = 300)
+```
+#2025 NBA Regualar Season: Assists vs Turnovers
+```{r}
+
+TOs_Assits <- player_3pt_summary_Regular %>% 
+    filter(TOTAL_STLS >= 50) 
+  
+TOs_Assits <- ggplot(TOs_Assits, aes(x = TPG, y= APG)) +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.5, height = 0.5)) +
+  labs(
+    title = "2025 NBA Regualar Season: Assists vs Turnovers",
+    subtitle = "Min. 82 Steals  | Source: nba.com via hoopR",
+    x = "Turnovers Per Game", 
+    y = "Assists Per Game"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+TOs_Assits
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/assists_TOs.jpg", width = 10, height = 8, dpi = 300)
+```
+
+
+
+#2025 NBA Regualar Season: Assists vs Steals
+```{r}
+STLs_Assits <-  player_3pt_summary_Regular %>% 
+  filter(TOTAL_STLS >= 50)  # Minimum attempts threshold
+
+
+STLs_Assits <- ggplot(STLs_Assits, aes(x = SPG, y= APG)) +
+  geom_image(aes(image = IMG_URL), 
+             size = 0.15, 
+             asp = 1.0,
+             position = position_jitter(width = 0.5, height = 0.5)) +
+  labs(
+    title = "2025 NBA Regualar Season: Assists vs Steals",
+    subtitle = "Min. 82 Steals  | Source: nba.com via hoopR",
+    x = "Steals Per Game", 
+    y = "Assists Per Game"
+  ) +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 16),
+    axis.title = element_text(size = 18))
+STLs_Assits
+
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/assists_STLs.jpg", width = 10, height = 8, dpi = 300)
+```
+# Build catch all metric using Math and Sport's formula
+```{r}
+# Make catch all metric
+
+# Step 1: Create TEAM_WINS table
+team_wins_2025 <- player_games_rs %>%
+  select(TEAM_ABBREVIATION, GAME_DATE, WL) %>%
+  distinct(TEAM_ABBREVIATION, GAME_DATE, .keep_all = TRUE) %>%  # One row per team-game
+  mutate(WIN = ifelse(WL == "W", 1, 0)) %>%
+  group_by(TEAM_ABBREVIATION) %>%
+  summarise(WINS = sum(WIN, na.rm = TRUE), .groups = "drop")
+
+# Step 2: Find each player's primary team (most games played)
+player_primary_team <- player_games_rs %>%
+  count(PLAYER_ID, TEAM_ABBREVIATION, name = "GAMES_PLAYED") %>%
+  group_by(PLAYER_ID) %>%
+  slice_max(GAMES_PLAYED, n = 1, with_ties = FALSE) %>%
+  ungroup()
+
+
+# Step 3: Calculate player-level metric and attach team
+player_custom_metric_2025 <- player_games_rs %>%
+  select(
+    PLAYER_NAME, PLAYER_ID, TEAM_ABBREVIATION, GAME_DATE,
+    PTS, FGA, FTA, MIN, FG3A, FG3M,
+    STL, BLK, AST, TOV, REB, PLUS_MINUS
+  ) %>%
+  mutate(
+    MIN = as.numeric(MIN),
+    across(c(PTS, FGA, FTA, FG3A, FG3M, STL, BLK, AST, TOV, REB, PLUS_MINUS), as.numeric)
+  ) %>%
+  filter(!is.na(MIN)) %>%
+  group_by(PLAYER_ID, PLAYER_NAME) %>%
+  summarise(
+    GP = n(),
+    AVG_PTS = mean(PTS, na.rm = TRUE),
+    AVG_FGA = mean(FGA, na.rm = TRUE),
+    AVG_FTA = mean(FTA, na.rm = TRUE),
+    AVG_MIN = mean(MIN, na.rm = TRUE),
+    AVG_FG3A = mean(FG3A, na.rm = TRUE),
+    AVG_STL = mean(STL, na.rm = TRUE),
+    AVG_BLK = mean(BLK, na.rm = TRUE),
+    AVG_AST = mean(AST, na.rm = TRUE),
+    AVG_TOV = mean(TOV, na.rm = TRUE),
+    AVG_REB = mean(REB, na.rm = TRUE),
+    AVG_PM  = mean(PLUS_MINUS, na.rm = TRUE),
+    CUSTOM_METRIC = 
+      AVG_PTS * 1.2 -
+      AVG_FGA * 0.96 -
+      AVG_FTA * 0.39 +
+      AVG_MIN * 0.09 +
+      AVG_FG3A +
+      AVG_STL * 1.2 +
+      AVG_BLK * 1.5 +
+      AVG_AST * 0.6 -
+      AVG_TOV +
+      AVG_REB * 0.3 +
+      AVG_PM * 0.34,
+    .groups = "drop"
+  ) %>%
+  filter(GP >= 10) %>%
+  left_join(player_primary_team, by = "PLAYER_ID") %>%
+  left_join(team_wins_2025, by = "TEAM_ABBREVIATION") %>%
+  arrange(desc(CUSTOM_METRIC))
+
+
+
+# Visualize the data
+top10 <- player_custom_metric_2025 %>%
+  slice_max(CUSTOM_METRIC, n = 30)
+
+# Then plot using ggplot2 in R
+library(ggplot2)
+
+ggplot(top10, aes(x = reorder(PLAYER_NAME, CUSTOM_METRIC), y = CUSTOM_METRIC)) +
+  geom_col(fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Top 30 NBA Players by Catch-all Metric Prototype (2025)",
+    x = "Player",
+    y = "Custom Metric Score"
+  ) +
+  theme_minimal() +
+  theme_classic() +
+    theme(
+    plot.title = element_text(size = 20, face = "bold"),
+    axis.text = element_text(size = 12),
+    axis.title = element_text(size = 18))
+ggsave("C:/Users/cmlando/OneDrive - Emory/Desktop/R Files/NBA Visualization/custom_metric_top30.jpg", width = 10, height = 8, dpi = 300)
+
+
+player_index <- hoopR::nba_playerindex()$PlayerIndex
+
+names(player_index)
+
+player_meta_clean <- player_index %>%
+  select(PERSON_ID, DISPLAY_FIRST_LAST = PLAYER_FIRST_NAME, POSITION, TEAM_ABBREVIATION) %>%
+  mutate(DISPLAY_FIRST_LAST = as.character(DISPLAY_FIRST_LAST))  # match merge type
+
+
+player_custom_metric_2025_pos <- player_custom_metric_2025 %>%
+  left_join(player_meta_clean, by = c("PLAYER_ID" = "PERSON_ID"))
+```
+
+
+```{r}
+# Ended here 06/17/25
+# Next steps: 
+#   - figure out best way to collapse multiple player positions (F-C), etc. 
+#   - Get updated regression coefficients for catch all
+#   - Exxplore data by position
+
 ```
 
